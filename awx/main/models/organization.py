@@ -39,8 +39,7 @@ class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVi
             ('member_organization', 'Basic participation permissions for organization'),
             ('audit_organization', 'Audit everything inside the organization'),
         ]
-        # Remove add permission, only superuser can add
-        default_permissions = ('change', 'delete', 'view')
+        default_permissions = ('add', 'change', 'delete', 'view')
 
     instance_groups = OrderedManyToManyField('InstanceGroup', blank=True, through='OrganizationInstanceGroupMembership')
     galaxy_credentials = OrderedManyToManyField(
