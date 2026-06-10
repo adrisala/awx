@@ -228,13 +228,14 @@ class Licenser(object):
         return host
 
     def validate_rh(self, user, pw, basic_auth):
+        # if REDHAT_CANDLEPIN_HOST is set, it takes priority (satellite/disconnected environments)
         # if basic auth is True, host is read from rhsm.conf (subscription.rhsm.redhat.com)
         # if basic auth is False, host is settings.SUBSCRIPTIONS_RHSM_URL (console.redhat.com)
-        # if rhsm.conf is not found, host is settings.REDHAT_CANDLEPIN_HOST (satellite server)
-        if basic_auth:
+        candlepin_host = getattr(settings, 'REDHAT_CANDLEPIN_HOST', None)
+        if candlepin_host:
+            host = candlepin_host
+        elif basic_auth:
             host = self.get_host_from_rhsm_config()
-            if not host:
-                host = getattr(settings, 'REDHAT_CANDLEPIN_HOST', None)
         else:
             host = settings.SUBSCRIPTIONS_RHSM_URL
 
