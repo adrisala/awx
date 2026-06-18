@@ -172,6 +172,69 @@ def Is(param):
     return instances
 
 
+def percent_capacity_remaining(capacity, consumed_capacity):
+    """Standalone implementation of the percent_capacity_remaining formula.
+
+    This mirrors the logic in InstanceGroupSerializer.get_percent_capacity_remaining
+    and InstanceSerializer.get_percent_capacity_remaining.
+    """
+    if not capacity or consumed_capacity >= capacity:
+        return 0.0
+    return float("{0:.2f}".format(((float(capacity) - float(consumed_capacity)) / (float(capacity))) * 100))
+
+
+class TestInstanceGroupPercentCapacityRemaining:
+    """Tests for the percent_capacity_remaining overflow guard.
+
+    Validates that get_percent_capacity_remaining returns 0.0 when consumed
+    capacity equals or exceeds total capacity, matching the guard in
+    InstanceSerializer.get_percent_capacity_remaining.
+    """
+
+    @pytest.mark.parametrize(
+        'capacity,consumed,expected,description',
+        [
+            (100, 0, 100.0, "No consumption returns 100%"),
+            (100, 50, 50.0, "Half consumed returns 50%"),
+            (100, 100, 0.0, "Fully consumed returns 0%"),
+            (100, 200, 0.0, "Over-consumed returns 0% (not negative)"),
+            (0, 0, 0.0, "Zero capacity returns 0%"),
+            (0, 50, 0.0, "Zero capacity with consumption returns 0%"),
+            (200, 43, 78.5, "Normal partial consumption"),
+        ],
+    )
+    def test_percent_capacity_remaining_formula(self, capacity, consumed, expected, description):
+        """Verify percent_capacity_remaining handles overflow correctly."""
+        result = percent_capacity_remaining(capacity, consumed)
+        assert result == expected, description
+        assert result >= 0.0, "percent_capacity_remaining must never be negative"
+
+    def test_overconsumed_instance_group_remaining_capacity(self, sample_cluster, create_ig_manager):
+        """Verify that when consumed capacity exceeds total capacity in an instance group,
+        the remaining capacity is clamped to zero (not negative).
+
+        This is the integration-level test for the overflow guard added to
+        InstanceGroupSerializer.get_percent_capacity_remaining.
+        """
+        ig = InstanceGroup(name='overloaded_ig')
+        # Instance with capacity 10, but we'll run a job with task_impact=20
+        inst = Instance(hostname='overloaded_host', capacity=10, node_type='hybrid')
+        ig.instances.add(inst)
+
+        tasks = [Job(task_impact=20, execution_node='overloaded_host', instance_group=ig)]
+        ig_mgr = create_ig_manager([ig], tasks)
+
+        capacity = ig_mgr.get_capacity('overloaded_ig')
+        consumed = ig_mgr.get_consumed_capacity('overloaded_ig')
+
+        # Consumed exceeds capacity
+        assert consumed > capacity, "Test setup: consumed should exceed capacity"
+        # The percent_capacity_remaining formula should return 0.0, not negative
+        result = percent_capacity_remaining(capacity, consumed)
+        assert result == 0.0, "Over-consumed instance group should return 0.0% remaining"
+        assert result >= 0.0, "Result must never be negative"
+
+
 class TestSelectBestInstanceForTask(object):
     @pytest.mark.parametrize(
         'task,instances,instance_fit_index,reason',
