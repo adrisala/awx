@@ -176,6 +176,76 @@ class TestMigrationSmoke:
 
 
 @pytest.mark.django_db
+class TestMigration0202DuplicateAuditor:
+    """
+    Test that migration 0202 does not create duplicate Platform Auditor
+    RoleUserAssignment records when a user already has a Platform Auditor
+    assignment.
+
+    Regression test for AAP-72477: The migration converts users from
+    Controller System Auditor to Platform Auditor using create() without
+    checking for pre-existing Platform Auditor assignments. If a user
+    already has Platform Auditor (e.g., from the gateway), a duplicate
+    row is created which later causes MultipleObjectsReturned errors
+    during JWT authentication.
+    """
+
+    def test_no_duplicate_auditor_assignments(self, migrator):
+        """When a user already has Platform Auditor, migration 0202 should
+        skip creating a duplicate assignment."""
+        old_state = migrator.apply_tested_migration(('main', '0201_create_managed_creds'))
+
+        RoleDefinition = old_state.apps.get_model('dab_rbac', 'RoleDefinition')
+        RoleUserAssignment = old_state.apps.get_model('dab_rbac', 'RoleUserAssignment')
+        DABPermission = old_state.apps.get_model('dab_rbac', 'DABPermission')
+        User = old_state.apps.get_model('auth', 'User')
+
+        user = User.objects.create(username='test-auditor-user')
+
+        # Create Platform Auditor role definition (may already exist)
+        auditor_rd, created = RoleDefinition.objects.get_or_create(
+            name='Platform Auditor',
+            defaults={'description': 'Test auditor role', 'managed': True},
+        )
+        if created:
+            auditor_rd.permissions.add(*list(DABPermission.objects.filter(codename__startswith='view')))
+
+        # Create Controller System Auditor role definition
+        old_rd = RoleDefinition.objects.create(
+            name='Controller System Auditor',
+            description='Old controller auditor role',
+            managed=True,
+        )
+
+        # Simulate pre-existing Platform Auditor assignment (e.g., from gateway)
+        RoleUserAssignment.objects.create(user=user, role_definition=auditor_rd)
+
+        # Also give user the old Controller System Auditor role
+        RoleUserAssignment.objects.create(user=user, role_definition=old_rd)
+
+        # Apply migration 0202 which converts Controller System Auditor -> Platform Auditor
+        new_state = migrator.apply_tested_migration(('main', '0202_convert_controller_role_definitions'))
+
+        RoleUserAssignment = new_state.apps.get_model('dab_rbac', 'RoleUserAssignment')
+        RoleDefinition = new_state.apps.get_model('dab_rbac', 'RoleDefinition')
+
+        auditor_rd = RoleDefinition.objects.get(name='Platform Auditor')
+
+        # There should be exactly 1 Platform Auditor assignment, not 2
+        auditor_assignments = RoleUserAssignment.objects.filter(
+            user=user,
+            role_definition=auditor_rd,
+        )
+        assert auditor_assignments.count() == 1, (
+            f"Expected exactly 1 Platform Auditor assignment but found {auditor_assignments.count()}. "
+            "Migration 0202 should not create a duplicate when the user already has Platform Auditor."
+        )
+
+        # Controller System Auditor should have been deleted
+        assert not RoleDefinition.objects.filter(name='Controller System Auditor').exists()
+
+
+@pytest.mark.django_db
 class TestGithubAppBug:
     """
     Tests that `awx-manage createsuperuser` runs successfully after
