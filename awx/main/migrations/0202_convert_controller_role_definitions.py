@@ -83,10 +83,15 @@ def convert_controller_role_definitions(apps, schema_editor):
     old_rd = RoleDefinition.objects.filter(name='Controller System Auditor').first()
     if old_rd:
         for assignment in RoleUserAssignment.objects.filter(role_definition=old_rd):
-            RoleUserAssignment.objects.create(
+            if not RoleUserAssignment.objects.filter(
                 user=assignment.user,
                 role_definition=auditor_rd,
-            )
+                object_role=None,
+            ).exists():
+                RoleUserAssignment.objects.create(
+                    user=assignment.user,
+                    role_definition=auditor_rd,
+                )
 
     # Delete the Controller System Auditor role
     RoleDefinition.objects.filter(name='Controller System Auditor').delete()
