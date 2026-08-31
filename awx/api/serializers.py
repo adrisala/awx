@@ -6112,9 +6112,9 @@ class InstanceGroupSerializer(BaseSerializer):
 
     def get_percent_capacity_remaining(self, obj):
         capacity = self.get_capacity(obj)
-        if not capacity:
-            return 0.0
         consumed_capacity = self.get_consumed_capacity(obj)
+        if not capacity or consumed_capacity >= capacity:
+            return 0.0
         return float("{0:.2f}".format(((float(capacity) - float(consumed_capacity)) / (float(capacity))) * 100))
 
     def get_instances(self, obj):
